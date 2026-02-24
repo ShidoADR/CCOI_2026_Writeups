@@ -48,14 +48,28 @@ I wrote a Python script to perform the interpolation, iterate through the 20-bit
 from Crypto.Util.number import long_to_bytes
 import hashlib
 
+# Paramètres du challenge
 p = 2**521 - 1
-TARGET_HASH_PREFIX = "f687cb74fdcefefc"
+TARGET_HASH = "f687cb74fdcefefc" # Le début du hash pour confirmer le flag
 
-# (Station data from the challenge...)
+# Données des stations intactes (x, y)
 x_intact = [1, 2, 3, 4, 5]
-y_intact = [0xd0393f...f5, 0xa0deb8...e4, 0x9dc6d6...45, 0xff3a80...57, 0x748755...cb]
+y_intact = [
+    0xd0393fd5aa76c02f53757a5883d97a0f0ade112cffc590c8378f2b5a6696a284dcc1ef10c29f7275958952bca3c40922f75258f47e808d587aca867f48f0d798f5,
+    0xa0deb8650c459c78e99ca5ae29c1399c8221723e6c966a4a4494ec69bcb20399336bba13c10998b4b0b554cffdaec9b8b536e6fa9ea4eefa7321782797b84672e4,
+    0x9dc6d639cbda2c6893efafe086027e1f9126a9e27f2d342e45e8090675c2eca7e4ae330b163f8f059fa665a20ea4be41a4de9fe882ac3b08387ba8649622293745,
+    0xff3a80c762b7a71ee3793ed87a7951f819960a86b067cefbe94cac78b9f556291ebf42ae21395da1a5e9d3d426624b6cf5bebb4487d9311737417749e401c0cb57,
+    0x748755843bdf0733e28882bb8f096fdd4c4ae2142cba5fb2ea4ba7e65a7b007a75f34a4f7a94b4b8e5b9d425d415b5750066cb52e451f11933b086614b816d4ecb
+]
+
+# Données des stations inondées (x, y partiel)
 x_flooded = [6, 7, 8, 9]
-y_partial = [0x18e91e...00, 0x2a67e4...00, 0xdbd27a...00, 0x57e86b...00]
+y_partial = [
+    0x18e91e304d2372e99ce65481f4a15284c423aa9ac47a25b639109b2c0c5d60cb6ba133679b80d2d34cfdc2c2968c5b83977eaa1b6e5ad7ed0368e3d0a9639300000,
+    0x2a67e416cef50a7fd1040a3c88f446f6955c3564ef1992c7311eab32fc23958dcbb2918c2ff4897a9380dcf879b81f599b4c34142f81454279da4cdb6245300000,
+    0xdbd27adc2803b734baba0522d86af830f98ee4051f093dd8a86cd68f8366481c71859657bcaaf62d8e20cde862d85e4e66e580aff9ee9a2e558135fef75c500000,
+    0x57e86be63e6ca409bbf147ebcd20ae61d581cec154bd076cddf821be5bd0fcc42db742bb80174af1bb5c773ec91e2884c5d273125030417e2c0ecb961be6800000
+]
 
 def lagrange_eval(x_eval, xs, ys, p):
     res = 0
@@ -69,20 +83,32 @@ def lagrange_eval(x_eval, xs, ys, p):
         res = (res + term) % p
     return res
 
+# Étape 1 : Calculer ce qu'on peut avec les 5 stations intactes
 A0 = lagrange_eval(0, x_intact, y_intact, p)
-K6, K7, K8, K9 = [(lagrange_eval(x, x_intact, y_intact, p) - y_partial[i]) % p for i, x in enumerate(x_flooded)]
+Ks = [(lagrange_eval(x, x_intact, y_intact, p) - y_partial[i]) % p for i, x in enumerate(x_flooded)]
 
-def to_signed(val): return val - p if val > p // 2 else val
-V7, V8, V9 = map(to_signed, [(K7 - 6*K6) % p, (K8 - 21*K6) % p, (K9 - 56*K6) % p])
+# Étape 2 : Préparer les relations entre les erreurs
+V7 = (Ks[1] - 6 * Ks[0]) % p
+V8 = (Ks[2] - 21 * Ks[0]) % p
+V9 = (Ks[3] - 56 * Ks[0]) % p
+Vs = [v - p if v > p // 2 else v for v in [V7, V8, V9]]
 
+# Étape 3 : Brute-force des 20 bits (1 048 576 possibilités)
+print("[*] Recherche du flag en cours...")
 for e6 in range(2**20):
-    e7, e8, e9 = 6*e6 + V7, 21*e6 + V8, 56*e6 + V9
+    # Calculer les erreurs pour les autres stations
+    e7, e8, e9 = 6*e6 + Vs[0], 21*e6 + Vs[1], 56*e6 + Vs[2]
+    
+    # Si toutes les erreurs sont cohérentes (dans la plage des 20 bits)
     if 0 <= e7 < 2**20 and 0 <= e8 < 2**20 and 0 <= e9 < 2**20:
-        c = (e6 - K6) * pow(120, -1, p) % p
+        c = (e6 - Ks[0]) * pow(120, -1, p) % p
         secret = (A0 - 120 * c) % p
-        flag_candidate = long_to_bytes(secret)
-        if hashlib.sha256(flag_candidate).hexdigest().startswith(TARGET_HASH_PREFIX):
-            print(f"Flag found: {flag_candidate.decode()}")
+        flag = long_to_bytes(secret)
+        
+        # Vérification finale avec le hash
+        if hashlib.sha256(flag).hexdigest().startswith(TARGET_HASH):
+            print(f"\n[+] Succès !")
+            print(f"Le flag est : {flag.decode()}")
             break
 ```
 
